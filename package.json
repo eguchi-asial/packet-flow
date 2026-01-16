@@ -1,0 +1,20 @@
+{
+  "name": "packetflow",
+  "version": "1.0.0",
+  "description": "Electron app with TypeScript",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && NODE_ENV=development electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.9",
+    "electron": "^40.0.0",
+    "typescript": "^5.9.3"
+  }
+}

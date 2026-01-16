@@ -1,0 +1,45 @@
+# 依存関係
+node_modules/
+
+# ビルド出力
+dist/
+out/
+build/
+
+# ログファイル
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS固有のファイル
+.DS_Store
+Thumbs.db
+
+# IDEの設定ファイル
+.idea/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+*.swp
+*.swo
+*~
+
+# 環境変数ファイル
+.env
+.env.local
+.env.*.local
+
+# テストカバレッジ
+coverage/
+.nyc_output/
+
+# 一時ファイル
+*.tmp
+*.temp
+.cache/
+
+# パッケージファイル
+*.tgz
+*.zip

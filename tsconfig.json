@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    // コンパイルターゲット: ES2022の機能を使用
+    "target": "ES2022",
+    // モジュールシステム: Node.jsのCommonJS形式
+    "module": "commonjs",
+    // 使用可能なライブラリ: ES2022の標準ライブラリ
+    "lib": ["ES2022"],
+    // コンパイル後のファイル出力先
+    "outDir": "./dist",
+    // ソースファイルのルートディレクトリ
+    "rootDir": "./src",
+    // 厳密な型チェックを有効化
+    "strict": true,
+    // CommonJSとESモジュール間の相互運用性を向上
+    "esModuleInterop": true,
+    // 型定義ファイル(.d.ts)のチェックをスキップして高速化
+    "skipLibCheck": true,
+    // ファイル名の大文字小文字を厳密にチェック
+    "forceConsistentCasingInFileNames": true,
+    // JSONファイルのインポートを許可
+    "resolveJsonModule": true,
+    // デバッグ用のソースマップを生成
+    "sourceMap": true,
+    // Node.jsスタイルのモジュール解決
+    "moduleResolution": "node"
+  },
+  // コンパイル対象: srcディレクトリ以下の全ファイル
+  "include": ["src/**/*"],
+  // コンパイル対象外: node_modulesとdistディレクトリ
+  "exclude": ["node_modules", "dist"]
+}
