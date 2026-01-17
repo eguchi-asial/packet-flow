@@ -1,12 +1,14 @@
 # PacketFlow
 
-macOSのネットワークインターフェース（en0）を流れるIPv4パケットをリアルタイムでキャプチャし、視覚的に表示するElectronベースのデスクトップアプリケーション。
+macOSとWindowsのネットワークインターフェースを流れるIPv4パケットをリアルタイムでキャプチャし、視覚的に表示するElectronベースのクロスプラットフォームデスクトップアプリケーション。
 
 ![PacketFlow Screenshot](https://via.placeholder.com/800x500.png?text=PacketFlow+Screenshot)
 
 ## 主な機能
 
-- 🔍 **リアルタイムパケットキャプチャ** - en0デバイスからIPv4パケットを即座にキャプチャ
+- 🔍 **リアルタイムパケットキャプチャ** - 選択したネットワークデバイスからIPv4パケットを即座にキャプチャ
+- 💻 **クロスプラットフォーム対応** - macOSとWindows両方で動作
+- 🎛️ **デバイス選択機能** - ドロップダウンから使いやすい表示名でデバイスを選択
 - 📊 **一意なIP表示** - 送信元IP-宛先IPペアで重複を排除し、新規通信のみ表示
 - 🌍 **詳細情報取得** - ipinfo.io APIを使用してIP情報（組織、国、地域、都市）を取得
 - 🔐 **プロトコル解析** - ポート番号からサービスを識別し、セキュリティ評価を実施
@@ -17,14 +19,25 @@ macOSのネットワークインターフェース（en0）を流れるIPv4パ�
 
 - **Electron** v32.3.3 - クロスプラットフォームデスクトップアプリフレームワーク
 - **TypeScript** v5.9.3 - 型安全な開発
-- **libpcap (cap)** v0.2.1 - ネイティブパケットキャプチャライブラリ
+- **libpcap / Npcap (cap)** v0.2.1 - ネイティブパケットキャプチャライブラリ
+  - macOS: libpcap経由でキャプチャ
+  - Windows: Npcap経由でキャプチャ
 - **ipinfo.io API** - IP地理情報・組織情報取得
 
 ## システム要件
 
-- macOS (en0ネットワークインターフェース使用)
+### 共通
 - Node.js 18.x以上
 - **管理者権限** (パケットキャプチャに必要)
+
+### macOS
+- macOS 10.15以上
+- libpcap (OS標準搭載)
+
+### Windows
+- Windows 10/11 (32-bit / 64-bit両方対応)
+- **Npcap** v1.70以上 ([https://npcap.com/](https://npcap.com/)からダウンロード・インストール)
+  - インストール時に「Install Npcap in WinPcap API-compatible Mode」をチェック
 
 ## インストール
 
@@ -42,19 +55,35 @@ npx electron-rebuild
 
 ## 使い方
 
-### 開発モード
+### macOS
 
+**開発モード**:
 ```bash
 # 管理者権限で起動（DevTools自動オープン）
 sudo npm run dev
 ```
 
-### 本番モード
-
+**本番モード**:
 ```bash
 # 管理者権限で起動
 sudo npm start
 ```
+
+### Windows
+
+**開発モード**:
+```powershell
+# 管理者権限でPowerShellまたはコマンドプロンプトを開いて実行
+npm run dev
+```
+
+**本番モード**:
+```powershell
+# 管理者権限で実行
+npm start
+```
+
+**注意**: Windowsでは、コマンドプロンプトまたはPowerShellを「管理者として実行」で開いてから上記コマンドを実行してください。
 
 ### ビルドのみ
 
@@ -109,16 +138,33 @@ PacketFlowは、**送信元IP-宛先IPの組み合わせ**を一意のキーと�
 ```
 PacketFlow/
 ├── src/
-│   ├── main.ts           # Electronメインプロセス
-│   ├── preload.ts        # プリロードスクリプト（IPC橋渡し）
-│   ├── renderer.ts       # レンダラープロセス（UI制御）
-│   ├── packet-capture.ts # パケットキャプチャマネージャー
-│   └── cap.d.ts          # capモジュールの型定義
+│   ├── main.ts                              # Electronメインプロセス
+│   ├── preload.ts                           # プリロードスクリプト（IPC橋渡し）
+│   ├── renderer.ts                          # レンダラープロセス（UI制御）
+│   └── packet-capture/
+│       ├── index.ts                         # パケットキャプチャファクトリー
+│       ├── types.ts                         # 共通インターフェース
+│       ├── cap.d.ts                         # capモジュールの型定義
+│       ├── macos/
+│       │   └── packet-capture-macos.ts      # macOS実装（libpcap）
+│       └── windows/
+│           └── packet-capture-windows.ts    # Windows実装（Npcap）
 ├── index.html            # UI（VSCode風ダークテーマ）
 ├── package.json
 ├── tsconfig.json
 └── README.md
 ```
+
+### アーキテクチャの特徴
+
+PacketFlowはプラットフォーム別実装を完全に分離した設計を採用しています:
+
+- **ファクトリーパターン**: `createPacketCaptureManager()`が実行時プラットフォームを自動検出
+- **共通インターフェース**: `IPacketCaptureManager`で両プラットフォームの動作を統一
+- **独立したモジュール**: macOSとWindowsの実装は別ファイルで管理、相互干渉なし
+- **デバイス表示名変換**: プラットフォーム固有のデバイス名を人間が読める形式に自動変換
+  - macOS: `en0` → `Wi-Fi (192.168.1.10)`
+  - Windows: `\Device\NPF_{GUID}` → `Intel(R) Wi-Fi 6 AX201 160MHz (192.168.1.10)`
 
 ## セキュリティ
 
@@ -131,10 +177,16 @@ PacketFlow/
 
 ### キャプチャが開始できない
 
+**macOS**:
 ```bash
 # 管理者権限で実行されているか確認
 sudo npm run dev
 ```
+
+**Windows**:
+1. Npcapがインストールされているか確認（[https://npcap.com/](https://npcap.com/)）
+2. コマンドプロンプト/PowerShellを「管理者として実行」で開いているか確認
+3. Windowsファイアウォールがブロックしていないか確認
 
 ### ネイティブモジュールエラー
 
@@ -143,12 +195,25 @@ sudo npm run dev
 npx electron-rebuild
 ```
 
-### en0デバイスが見つからない
+### デバイスが見つからない
 
+**macOS**:
 ```bash
 # ネットワークインターフェースを確認
-ifconfig | grep en0
+ifconfig
 ```
+
+**Windows**:
+```powershell
+# ネットワークアダプタを確認
+ipconfig /all
+```
+
+### Windows: Npcapインストール後も動作しない
+
+1. Npcapインストール時に「Install Npcap in WinPcap API-compatible Mode」がチェックされているか確認
+2. Npcapを再インストール（アンインストール後に再度インストール）
+3. アプリを完全に終了してから再起動
 
 ## ライセンス
 

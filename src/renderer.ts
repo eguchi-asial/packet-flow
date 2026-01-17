@@ -36,6 +36,7 @@ const stats = {
 };
 
 // DOM要素の取得
+const deviceSelect = document.getElementById('device-select') as HTMLSelectElement;
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement;
 const stopBtn = document.getElementById('stop-btn') as HTMLButtonElement;
 const clearBtn = document.getElementById('clear-btn') as HTMLButtonElement;
@@ -68,6 +69,9 @@ async function init(): Promise<void> {
       addPacket(packet);
     });
 
+    // デバイス一覧を取得してドロップダウンに追加
+    await loadDevices();
+
     console.log('[Renderer] 初期化完了');
   } catch (error) {
     console.error('[Renderer] 初期化エラー:', error);
@@ -76,14 +80,54 @@ async function init(): Promise<void> {
 }
 
 /**
- * キャプチャを開始（en0デバイスを使用）
+ * デバイス一覧を読み込んでドロップダウンに表示
+ */
+async function loadDevices(): Promise<void> {
+  try {
+    const devices = await win.api.capture.getDevices();
+    console.log('[Renderer] デバイス一覧取得:', devices);
+
+    deviceSelect.innerHTML = '';
+
+    if (devices.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'デバイスが見つかりません';
+      deviceSelect.appendChild(option);
+      startBtn.disabled = true;
+      return;
+    }
+
+    devices.forEach((device: any) => {
+      const option = document.createElement('option');
+      option.value = device.name;
+      option.textContent = device.displayName || device.name;
+      deviceSelect.appendChild(option);
+    });
+
+    startBtn.disabled = false;
+  } catch (error) {
+    console.error('[Renderer] デバイス読み込みエラー:', error);
+    deviceSelect.innerHTML = '<option value="">デバイス読み込みエラー</option>';
+    startBtn.disabled = true;
+  }
+}
+
+/**
+ * キャプチャを開始（選択されたデバイスを使用）
  */
 async function startCapture(): Promise<void> {
   console.log('[Renderer] キャプチャ開始ボタンがクリックされました');
 
+  const selectedDevice = deviceSelect.value;
+  if (!selectedDevice) {
+    alert('デバイスを選択してください');
+    return;
+  }
+
   try {
-    console.log('[Renderer] キャプチャ開始をリクエスト中（en0使用）...');
-    const result = await win.api.capture.startCapture('en0');
+    console.log('[Renderer] キャプチャ開始をリクエスト中（デバイス:', selectedDevice, ')...');
+    const result = await win.api.capture.startCapture(selectedDevice);
     console.log('[Renderer] キャプチャ開始結果:', result);
     updateUIState(true);
   } catch (error) {
@@ -126,11 +170,13 @@ function clearPackets(): void {
  */
 function updateUIState(isCapturing: boolean): void {
   if (isCapturing) {
+    deviceSelect.disabled = true;
     startBtn.disabled = true;
     stopBtn.disabled = false;
     statusEl.textContent = 'キャプチャ中...';
     statusEl.classList.add('capturing');
   } else {
+    deviceSelect.disabled = false;
     startBtn.disabled = false;
     stopBtn.disabled = true;
     statusEl.textContent = '停止中';

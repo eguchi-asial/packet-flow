@@ -4,8 +4,8 @@ import { IPacketCaptureManager } from './types';
  * プラットフォーム別のパケットキャプチャマネージャーを生成するファクトリー関数
  *
  * 現在の対応状況:
- * - macOS: 完全対応（libpcap経由でen0デバイスをキャプチャ）
- * - Windows: 未対応（実装時にはNpcapが必要）
+ * - macOS: 完全対応（libpcap経由でパケットをキャプチャ）
+ * - Windows: 完全対応（Npcap経由でパケットをキャプチャ）
  * - Linux: 未対応
  *
  * @returns プラットフォームに応じたパケットキャプチャマネージャー
@@ -22,9 +22,9 @@ export function createPacketCaptureManager(): IPacketCaptureManager {
     console.log('[PacketCapture] macOS用モジュールをロード');
     return new PacketCaptureMacOS();
   } else if (platform === 'win32') {
-    // Windows（未実装だが将来の拡張用）
+    // Windows
     const { PacketCaptureWindows } = require('./windows/packet-capture-windows');
-    console.log('[PacketCapture] Windows用モジュールをロード（未実装）');
+    console.log('[PacketCapture] Windows用モジュールをロード');
     return new PacketCaptureWindows();
   } else {
     throw new Error(
@@ -32,8 +32,8 @@ export function createPacketCaptureManager(): IPacketCaptureManager {
       '\n' +
       '対応プラットフォーム:\n' +
       '- macOS (darwin) ✅\n' +
-      '- Windows (win32) ❌ 未実装\n' +
-      '- Linux ❌ 未実装'
+      '- Windows (win32) ✅\n' +
+      '- Linux ❌ 未対応'
     );
   }
 }

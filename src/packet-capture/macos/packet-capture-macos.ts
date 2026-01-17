@@ -22,7 +22,68 @@ export class PacketCaptureMacOS implements IPacketCaptureManager {
    * 利用可能なネットワークデバイスを取得
    */
   getDevices(): any[] {
-    return Cap.Cap.deviceList();
+    const devices = Cap.Cap.deviceList();
+
+    // 各デバイスに表示用の名前を追加
+    const devicesWithDisplayName = devices.map(device => ({
+      ...device,
+      displayName: this.getDeviceDisplayName(device)
+    }));
+
+    // アクティブなデバイス（IPv4アドレスを持つもの）を優先的に表示
+    return devicesWithDisplayName.sort((a, b) => {
+      const aHasIPv4 = a.addresses?.some((addr: any) =>
+        addr.addr && !addr.addr.includes(':') && !addr.addr.startsWith('fe80')
+      );
+      const bHasIPv4 = b.addresses?.some((addr: any) =>
+        addr.addr && !addr.addr.includes(':') && !addr.addr.startsWith('fe80')
+      );
+
+      // IPv4アドレスを持つデバイスを優先
+      if (aHasIPv4 && !bHasIPv4) return -1;
+      if (!aHasIPv4 && bHasIPv4) return 1;
+
+      // 両方ともIPv4を持つ場合、en0を最優先
+      if (aHasIPv4 && bHasIPv4) {
+        if (a.name === 'en0') return -1;
+        if (b.name === 'en0') return 1;
+      }
+
+      return 0;
+    });
+  }
+
+  /**
+   * macOS用のデバイス表示名を生成
+   */
+  private getDeviceDisplayName(device: any): string {
+    const name = device.name;
+
+    // IPv4アドレスを取得
+    const ipv4Address = device.addresses?.find((addr: any) =>
+      addr.addr && !addr.addr.includes(':') && !addr.addr.startsWith('fe80')
+    );
+
+    // en0, en1などの一般的なデバイス名の場合
+    if (name.match(/^en\d+$/)) {
+      const deviceNum = name.substring(2);
+      const deviceType = deviceNum === '0' ? 'Wi-Fi' : `Ethernet ${deviceNum}`;
+      if (ipv4Address) {
+        return `${deviceType} (${ipv4Address.addr})`;
+      }
+      return deviceType;
+    }
+
+    // その他のデバイス（lo0, bridge0など）
+    if (device.description) {
+      return device.description;
+    }
+
+    if (ipv4Address) {
+      return `${name} (${ipv4Address.addr})`;
+    }
+
+    return name;
   }
 
   /**
