@@ -1,25 +1,12 @@
 import * as Cap from 'cap';
 import { BrowserWindow } from 'electron';
+import { IPacketCaptureManager, PacketInfo } from '../types';
 
 /**
- * パケット情報の型定義
+ * macOS専用パケットキャプチャマネージャー
+ * libpcap (cap)を使用してen0デバイスからパケットをキャプチャ
  */
-export interface PacketInfo {
-  id: number;
-  timestamp: string;
-  protocol: string;
-  sourceIP: string;
-  destIP: string;
-  sourcePort?: number;
-  destPort?: number;
-  length: number;
-  info: string;
-}
-
-/**
- * パケットキャプチャマネージャー
- */
-export class PacketCaptureManager {
+export class PacketCaptureMacOS implements IPacketCaptureManager {
   private cap: any;
   private device: string | null = null;
   private isCapturing = false;
@@ -46,26 +33,26 @@ export class PacketCaptureManager {
   }
 
   /**
-   * キャプチャを開始
+   * キャプチャを開始（macOS用実装）
    */
   startCapture(deviceName?: string): boolean {
-    console.log('[PacketCapture] キャプチャ開始リクエスト:', deviceName);
+    console.log('[PacketCapture:macOS] キャプチャ開始リクエスト:', deviceName);
 
     if (this.isCapturing) {
-      console.log('[PacketCapture] 既にキャプチャ中です');
+      console.log('[PacketCapture:macOS] 既にキャプチャ中です');
       return false;
     }
 
     const devices = this.getDevices();
-    console.log('[PacketCapture] 利用可能なデバイス:', devices);
+    console.log('[PacketCapture:macOS] 利用可能なデバイス:', devices);
 
     if (devices.length === 0) {
       throw new Error('利用可能なネットワークデバイスが見つかりません');
     }
 
-    // デバイス名が指定されていない場合は最初のデバイスを使用
-    this.device = deviceName || devices[0].name;
-    console.log('[PacketCapture] 使用するデバイス:', this.device);
+    // デバイス名が指定されていない場合はen0を優先的に使用（macOSのデフォルト）
+    this.device = deviceName || 'en0';
+    console.log('[PacketCapture:macOS] 使用するデバイス:', this.device);
 
     try {
       // キャプチャフィルター: 全てのIPパケット
@@ -74,9 +61,9 @@ export class PacketCaptureManager {
       const buffer = Buffer.alloc(65535);
 
       // リンクタイプを取得
-      console.log('[PacketCapture] capを開いています...');
+      console.log('[PacketCapture:macOS] capを開いています...');
       const linkType = this.cap.open(this.device, filter, bufSize, buffer);
-      console.log('[PacketCapture] リンクタイプ:', linkType);
+      console.log('[PacketCapture:macOS] リンクタイプ:', linkType);
 
       this.isCapturing = true;
       this.packetCounter = 0;
@@ -86,10 +73,10 @@ export class PacketCaptureManager {
         this.handlePacket(nbytes, buffer, linkType);
       });
 
-      console.log('[PacketCapture] キャプチャ開始成功');
+      console.log('[PacketCapture:macOS] キャプチャ開始成功');
       return true;
     } catch (error) {
-      console.error('[PacketCapture] キャプチャ開始エラー:', error);
+      console.error('[PacketCapture:macOS] キャプチャ開始エラー:', error);
       throw error;
     }
   }
@@ -102,6 +89,7 @@ export class PacketCaptureManager {
       this.cap.close();
       this.isCapturing = false;
       this.device = null;
+      console.log('[PacketCapture:macOS] キャプチャ停止');
     }
   }
 
@@ -120,7 +108,7 @@ export class PacketCaptureManager {
     const shouldLog = this.debugLogCounter < 10;
 
     if (shouldLog) {
-      console.log('[PacketCapture] パケット受信イベント発火 - バイト数:', nbytes, 'リンクタイプ:', linkType);
+      console.log('[PacketCapture:macOS] パケット受信イベント発火 - バイト数:', nbytes, 'リンクタイプ:', linkType);
       this.debugLogCounter++;
     }
 
@@ -128,30 +116,30 @@ export class PacketCaptureManager {
       const packet = this.parsePacket(buffer, nbytes, linkType, shouldLog);
 
       if (shouldLog) {
-        console.log('[PacketCapture] 解析結果:', packet);
+        console.log('[PacketCapture:macOS] 解析結果:', packet);
       }
 
       if (packet && this.mainWindow) {
         // レンダラープロセスにパケット情報を送信
         if (shouldLog || packet.id % 100 === 1) {
-          console.log('[PacketCapture] パケット送信:', packet.id, packet.protocol);
+          console.log('[PacketCapture:macOS] パケット送信:', packet.id, packet.protocol);
         }
         this.mainWindow.webContents.send('packet-captured', packet);
       } else {
         if (!packet && shouldLog) {
-          console.warn('[PacketCapture] パケット解析結果がnull');
+          console.warn('[PacketCapture:macOS] パケット解析結果がnull');
         }
         if (!this.mainWindow) {
-          console.warn('[PacketCapture] mainWindowが未設定');
+          console.warn('[PacketCapture:macOS] mainWindowが未設定');
         }
       }
     } catch (error) {
-      console.error('[PacketCapture] パケット解析エラー:', error);
+      console.error('[PacketCapture:macOS] パケット解析エラー:', error);
     }
   }
 
   /**
-   * パケットを解析
+   * パケットを解析（macOS/libpcap形式）
    */
   private parsePacket(buffer: Buffer, length: number, linkType: string, shouldLog: boolean = false): PacketInfo | null {
     try {
@@ -165,12 +153,12 @@ export class PacketCaptureManager {
       // IPヘッダーを解析
       const ipVersion = (buffer[offset] >> 4) & 0x0f;
       if (shouldLog) {
-        console.log('[PacketCapture] IPバージョン:', ipVersion);
+        console.log('[PacketCapture:macOS] IPバージョン:', ipVersion);
       }
       if (ipVersion !== 4) {
         // IPv6は未対応
         if (shouldLog) {
-          console.log('[PacketCapture] IPv6パケットのためスキップ');
+          console.log('[PacketCapture:macOS] IPv6パケットのためスキップ');
         }
         return null;
       }
@@ -223,7 +211,7 @@ export class PacketCaptureManager {
 
       return packetInfo;
     } catch (error) {
-      console.error('パケット解析エラー:', error);
+      console.error('[PacketCapture:macOS] パケット解析エラー:', error);
       return null;
     }
   }

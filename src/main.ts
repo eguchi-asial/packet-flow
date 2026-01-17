@@ -1,9 +1,9 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
-import { PacketCaptureManager } from './packet-capture';
+import { createPacketCaptureManager, IPacketCaptureManager } from './packet-capture/index';
 
-// パケットキャプチャマネージャーのインスタンス
-let captureManager: PacketCaptureManager;
+// パケットキャプチャマネージャーのインスタンス（プラットフォーム別）
+let captureManager: IPacketCaptureManager;
 
 /**
  * メインウィンドウを作成する
@@ -30,8 +30,8 @@ function createWindow(): void {
     mainWindow.webContents.openDevTools();
   }
 
-  // パケットキャプチャマネージャーを初期化
-  captureManager = new PacketCaptureManager();
+  // パケットキャプチャマネージャーを初期化（プラットフォーム別に自動選択）
+  captureManager = createPacketCaptureManager();
   captureManager.setMainWindow(mainWindow);
 }
 
