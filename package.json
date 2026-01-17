@@ -13,8 +13,12 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.2",
     "@types/node": "^25.0.9",
-    "electron": "^40.0.0",
+    "electron": "^32.3.3",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "cap": "^0.2.1"
   }
 }

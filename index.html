@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'">
-  <title>PacketFlow</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://ipinfo.io">
+  <title>PacketFlow - パケットキャプチャ</title>
   <style>
     * {
       margin: 0;
@@ -14,35 +14,530 @@
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      background: #1e1e1e;
+      color: #d4d4d4;
       height: 100vh;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
+      display: flex;
+      flex-direction: column;
     }
 
-    .container {
-      text-align: center;
-      padding: 2rem;
+    /* ヘッダー */
+    header {
+      background: #2d2d30;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #3e3e42;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
     }
 
     h1 {
-      font-size: 4rem;
-      margin-bottom: 1rem;
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+      font-size: 1.5rem;
+      color: #fff;
+      margin: 0;
     }
 
-    p {
-      font-size: 1.5rem;
-      opacity: 0.9;
+    /* コントロールパネル */
+    .controls {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      margin-left: auto;
+    }
+
+    select {
+      background: #3c3c3c;
+      color: #d4d4d4;
+      border: 1px solid #555;
+      padding: 0.5rem;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      min-width: 200px;
+    }
+
+    button {
+      background: #0e639c;
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #1177bb;
+    }
+
+    button:disabled {
+      background: #3c3c3c;
+      color: #666;
+      cursor: not-allowed;
+    }
+
+    button.stop {
+      background: #c5192d;
+    }
+
+    button.stop:hover {
+      background: #e81123;
+    }
+
+    button.clear {
+      background: #3c3c3c;
+    }
+
+    button.clear:hover {
+      background: #555;
+    }
+
+    .status {
+      padding: 0.5rem 1rem;
+      background: #3c3c3c;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+
+    .status.capturing {
+      background: #0e639c;
+      color: white;
+    }
+
+    /* メインコンテンツ */
+    main {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* パケット統計 */
+    .stats {
+      background: #252526;
+      padding: 0.75rem 1.5rem;
+      border-bottom: 1px solid #3e3e42;
+      display: flex;
+      gap: 2rem;
+      font-size: 0.9rem;
+    }
+
+    .stat-item {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .stat-label {
+      color: #888;
+    }
+
+    .stat-value {
+      color: #4ec9b0;
+      font-weight: 600;
+    }
+
+    /* パケットテーブル */
+    .packet-table-container {
+      flex: 1;
+      overflow: auto;
+      background: #1e1e1e;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    thead {
+      position: sticky;
+      top: 0;
+      background: #2d2d30;
+      z-index: 1;
+    }
+
+    th {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 2px solid #3e3e42;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #2d2d30;
+    }
+
+    tbody tr:hover {
+      background: #2a2d2e;
+    }
+
+    .protocol-tcp {
+      color: #4ec9b0;
+    }
+
+    .protocol-udp {
+      color: #c586c0;
+    }
+
+    .protocol-icmp {
+      color: #dcdcaa;
+    }
+
+    .protocol-other {
+      color: #888;
+    }
+
+    /* 詳細ボタン */
+    .detail-btn {
+      background: #0e639c;
+      color: white;
+      border: none;
+      padding: 0.25rem 0.5rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 0.75rem;
+      transition: background 0.2s;
+    }
+
+    .detail-btn:hover {
+      background: #1177bb;
+    }
+
+    /* モーダル */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: #2d2d30;
+      border: 1px solid #3e3e42;
+      border-radius: 8px;
+      width: 90%;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+      padding: 1.5rem;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      border-bottom: 1px solid #3e3e42;
+      padding-bottom: 1rem;
+    }
+
+    .modal-header h2 {
+      font-size: 1.25rem;
+      color: #fff;
+      margin: 0;
+    }
+
+    .modal-close {
+      background: #c5192d;
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    .modal-close:hover {
+      background: #e81123;
+    }
+
+    .detail-section {
+      margin-bottom: 1.5rem;
+    }
+
+    .detail-section h3 {
+      color: #4ec9b0;
+      font-size: 1rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .detail-row {
+      display: flex;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid #3e3e42;
+    }
+
+    .detail-label {
+      color: #888;
+      min-width: 120px;
+    }
+
+    .detail-value {
+      color: #d4d4d4;
+      flex: 1;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 2rem;
+      color: #888;
+    }
+
+    /* 空の状態 */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #888;
+      gap: 1rem;
+    }
+
+    .empty-state svg {
+      width: 64px;
+      height: 64px;
+      opacity: 0.5;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Hello World</h1>
-    <p>Electron + TypeScript</p>
+  <header>
+    <h1>PacketFlow</h1>
+    <button id="about-btn" style="background: transparent; color: #4ec9b0; text-decoration: underline; padding: 0; margin-left: 0.5rem; font-size: 0.85rem;">このアプリについて</button>
+    <div class="controls">
+      <button id="start-btn">キャプチャ開始</button>
+      <button id="stop-btn" class="stop" disabled>停止</button>
+      <button id="clear-btn" class="clear">クリア</button>
+      <div id="status" class="status">停止中</div>
+    </div>
+  </header>
+
+  <main>
+    <div class="stats">
+      <div class="stat-item">
+        <span class="stat-label">総パケット数:</span>
+        <span class="stat-value" id="total-packets">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">TCP:</span>
+        <span class="stat-value" id="tcp-count">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">UDP:</span>
+        <span class="stat-value" id="udp-count">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">ICMP:</span>
+        <span class="stat-value" id="icmp-count">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">その他:</span>
+        <span class="stat-value" id="other-count">0</span>
+      </div>
+    </div>
+
+    <div class="packet-table-container">
+      <table id="packet-table">
+        <thead>
+          <tr>
+            <th style="width: 60px;">No.</th>
+            <th style="width: 180px;">時刻</th>
+            <th style="width: 80px;">プロトコル</th>
+            <th style="width: 150px;">送信元IP</th>
+            <th style="width: 150px;">宛先IP</th>
+            <th style="width: 100px;">長さ</th>
+            <th>情報</th>
+            <th style="width: 80px;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="packet-tbody">
+          <tr>
+            <td colspan="8">
+              <div class="empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                  <path d="M2 17l10 5 10-5M2 12l10 5 10-5"></path>
+                </svg>
+                <p>キャプチャを開始してください</p>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- 詳細モーダル -->
+  <div id="detail-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>パケット詳細情報</h2>
+        <button class="modal-close" id="modal-close-btn">閉じる</button>
+      </div>
+      <div id="modal-body">
+        <div class="loading">読み込み中...</div>
+      </div>
+    </div>
   </div>
+
+  <!-- このアプリについてモーダル -->
+  <div id="about-modal" class="modal">
+    <div class="modal-content" style="max-width: 800px;">
+      <div class="modal-header">
+        <h2>PacketFlowについて</h2>
+        <button class="modal-close" id="about-modal-close-btn">閉じる</button>
+      </div>
+      <div id="about-modal-body">
+        <div class="detail-section">
+          <h3>アプリの概要</h3>
+          <p style="color: #d4d4d4; line-height: 1.6; margin-bottom: 1rem;">
+            PacketFlowは、macOSのネットワークインターフェース（en0）を流れるIPv4パケットをリアルタイムでキャプチャし、
+            視覚的に表示するElectronベースのデスクトップアプリケーションです。
+          </p>
+        </div>
+
+        <div class="detail-section">
+          <h3>技術仕様</h3>
+          <div class="detail-row">
+            <div class="detail-label">パケットキャプチャ</div>
+            <div class="detail-value">libpcap（capモジュール）を使用してen0デバイスから生のパケットを取得</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">対応プロトコル</div>
+            <div class="detail-value">IPv4のみ（TCP, UDP, ICMP, その他）</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">フィルタリング</div>
+            <div class="detail-value">BPF（Berkeley Packet Filter）で'ip'フィルタを適用</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">バッファサイズ</div>
+            <div class="detail-value">10MB（高速なパケット処理に対応）</div>
+          </div>
+        </div>
+
+        <div class="detail-section">
+          <h3>一意なIPペアの表示方法</h3>
+          <p style="color: #d4d4d4; line-height: 1.6; margin-bottom: 0.5rem;">
+            PacketFlowは、<strong style="color: #4ec9b0;">送信元IP-宛先IPの組み合わせ</strong>を一意のキーとして管理し、
+            同じIPペアの通信は初回のみ表示します。
+          </p>
+          <div class="detail-row">
+            <div class="detail-label">判定基準</div>
+            <div class="detail-value">送信元IP + 宛先IP（ポート番号は無視）</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">実装方法</div>
+            <div class="detail-value">JavaScriptのSetオブジェクトで既出IPペアを記録（seenIPPairs）</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">統計情報</div>
+            <div class="detail-value">全パケット数をカウント、一覧には新規IPペアのみ追加</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">上限</div>
+            <div class="detail-value">最大10,000件まで保存（古いものから自動削除）</div>
+          </div>
+        </div>
+
+        <div class="detail-section">
+          <h3>「詳細」ボタンの機能</h3>
+          <p style="color: #d4d4d4; line-height: 1.6; margin-bottom: 0.5rem;">
+            各パケット行の「詳細」ボタンを押下すると、宛先IPアドレスの詳細情報を外部APIから取得し、
+            通信内容を解析して表示します。
+          </p>
+
+          <h4 style="color: #c586c0; font-size: 0.9rem; margin: 1rem 0 0.5rem 0;">取得する情報</h4>
+          <div class="detail-row">
+            <div class="detail-label">基本情報</div>
+            <div class="detail-value">パケット番号、時刻、プロトコル、送信元・宛先IP、ポート番号、パケット長</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">IP詳細情報</div>
+            <div class="detail-value">組織名（ISP/企業）、国、地域、都市、ホスト名</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">情報取得元</div>
+            <div class="detail-value">ipinfo.io API（WHOIS、GeoIP、PTRレコードを統合）</div>
+          </div>
+
+          <h4 style="color: #c586c0; font-size: 0.9rem; margin: 1rem 0 0.5rem 0;">通信内容の推測</h4>
+          <div class="detail-row">
+            <div class="detail-label">サービス識別</div>
+            <div class="detail-value">ポート番号から使用サービスを特定（HTTPS:443, DNS:53, QUIC:443/UDP等）</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">用途の説明</div>
+            <div class="detail-value">通信の目的を解説（Web閲覧、メール、リモート管理等）</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">セキュリティ評価</div>
+            <div class="detail-value">暗号化の有無を判定し、安全性を評価</div>
+          </div>
+
+          <h4 style="color: #c586c0; font-size: 0.9rem; margin: 1rem 0 0.5rem 0;">解析例</h4>
+          <div class="detail-row">
+            <div class="detail-label">52.69.186.44:443</div>
+            <div class="detail-value">
+              組織: Amazon Web Services (ap-northeast-1)<br>
+              サービス: HTTPS（暗号化Web通信）<br>
+              推測: AWS東京リージョンとのHTTPS通信
+            </div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">224.0.0.251:5353</div>
+            <div class="detail-value">
+              サービス: mDNS（マルチキャストDNS）<br>
+              用途: AirPrint、AirPlay、ローカルデバイス検出<br>
+              セキュリティ: ローカルネットワーク内のみで安全
+            </div>
+          </div>
+        </div>
+
+        <div class="detail-section">
+          <h3>パケット解析の仕組み</h3>
+          <div class="detail-row">
+            <div class="detail-label">Ethernetヘッダー</div>
+            <div class="detail-value">14バイトをスキップ</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">IPヘッダー</div>
+            <div class="detail-value">バージョン、ヘッダー長、プロトコル番号、送信元・宛先IPを抽出</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">TCP/UDPヘッダー</div>
+            <div class="detail-value">送信元・宛先ポート番号をビッグエンディアンで読み取り</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">プロトコル判定</div>
+            <div class="detail-value">IPヘッダーのプロトコルフィールド（6=TCP, 17=UDP, 1=ICMP）</div>
+          </div>
+        </div>
+
+        <div class="detail-section">
+          <h3>必要な権限</h3>
+          <p style="color: #e81123; line-height: 1.6;">
+            ⚠️ パケットキャプチャには管理者権限が必要です。
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="dist/renderer.js"></script>
 </body>
 </html>
