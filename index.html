@@ -360,6 +360,7 @@
             <th style="width: 60px;">No.</th>
             <th style="width: 180px;">時刻</th>
             <th style="width: 80px;">プロトコル</th>
+            <th style="width: 150px;">状態</th>
             <th style="width: 150px;">送信元IP</th>
             <th style="width: 150px;">宛先IP</th>
             <th style="width: 100px;">長さ</th>
@@ -369,7 +370,7 @@
         </thead>
         <tbody id="packet-tbody">
           <tr>
-            <td colspan="8">
+            <td colspan="9">
               <div class="empty-state">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
@@ -393,6 +394,19 @@
       </div>
       <div id="modal-body">
         <div class="loading">読み込み中...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 状態説明モーダル -->
+  <div id="state-modal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h2>状態の説明</h2>
+        <button class="modal-close" id="state-modal-close-btn">閉じる</button>
+      </div>
+      <div id="state-modal-body" style="padding: 1.5rem;">
+        <div id="state-explanation"></div>
       </div>
     </div>
   </div>

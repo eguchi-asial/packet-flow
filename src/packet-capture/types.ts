@@ -13,6 +13,8 @@ export interface PacketInfo {
   destPort?: number;
   length: number;
   info: string;
+  domainName?: string; // DNS/SNIから取得したドメイン名
+  packetState?: string; // TCP/TLS状態（SYN, ACK, Client Hello等）
 }
 
 /**

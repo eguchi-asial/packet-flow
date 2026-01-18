@@ -20,11 +20,8 @@ interface WindowWithAPI extends Window {
 // windowをWindowWithAPIとして扱う
 const win = window as unknown as WindowWithAPI;
 
-// パケットデータを保存する配列（IP一意のパケットのみ）
+// パケットデータを保存する配列（全パケット）
 let packets: any[] = [];
-
-// 既に表示したIPペアを記録するSet（送信元IP-宛先IPの組み合わせ）
-const seenIPPairs = new Set<string>();
 
 // 統計情報
 const stats = {
@@ -48,6 +45,9 @@ const modalBody = document.getElementById('modal-body') as HTMLDivElement;
 const aboutBtn = document.getElementById('about-btn') as HTMLButtonElement;
 const aboutModal = document.getElementById('about-modal') as HTMLDivElement;
 const aboutModalCloseBtn = document.getElementById('about-modal-close-btn') as HTMLButtonElement;
+const stateModal = document.getElementById('state-modal') as HTMLDivElement;
+const stateModalCloseBtn = document.getElementById('state-modal-close-btn') as HTMLButtonElement;
+const stateExplanation = document.getElementById('state-explanation') as HTMLDivElement;
 
 // 統計要素
 const totalPacketsEl = document.getElementById('total-packets') as HTMLSpanElement;
@@ -55,6 +55,38 @@ const tcpCountEl = document.getElementById('tcp-count') as HTMLSpanElement;
 const udpCountEl = document.getElementById('udp-count') as HTMLSpanElement;
 const icmpCountEl = document.getElementById('icmp-count') as HTMLSpanElement;
 const otherCountEl = document.getElementById('other-count') as HTMLSpanElement;
+
+// 状態説明のマッピング
+const stateExplanations: { [key: string]: string } = {
+  // TCP フラグ
+  'SYN': '<strong>SYN (Synchronize)</strong><br>TCP接続の開始を要求するフラグです。クライアントがサーバーに接続を確立しようとする際に送信されます。',
+  'ACK': '<strong>ACK (Acknowledgment)</strong><br>データの受信確認を示すフラグです。相手から受け取ったデータを正常に受信したことを通知します。',
+  'FIN': '<strong>FIN (Finish)</strong><br>TCP接続の終了を要求するフラグです。データの送信が完了し、接続を閉じる準備ができたことを示します。',
+  'RST': '<strong>RST (Reset)</strong><br>TCP接続を強制的にリセットするフラグです。エラーや予期しない状況で接続を即座に終了する際に使用されます。',
+  'PSH': '<strong>PSH (Push)</strong><br>データを即座にアプリケーションに渡すよう要求するフラグです。バッファリングせずにデータを処理する必要がある場合に使用されます。',
+  'URG': '<strong>URG (Urgent)</strong><br>緊急データが含まれていることを示すフラグです。通常のデータより優先的に処理されます。',
+
+  // TCP フラグの組み合わせ
+  'SYN,ACK': '<strong>SYN+ACK</strong><br>TCP 3ウェイハンドシェイクの2番目のステップです。サーバーがクライアントからのSYNを受け取り、接続を承認する応答です。',
+  'FIN,ACK': '<strong>FIN+ACK</strong><br>TCP接続の正常な終了プロセスの一部です。接続終了要求を確認しながら、自分も終了する準備ができていることを示します。',
+  'PSH,ACK': '<strong>PSH+ACK</strong><br>データの即座の転送と、以前のデータの受信確認を同時に行います。HTTPリクエスト/レスポンスなどでよく見られます。',
+
+  // TLS/SSL ハンドシェイク
+  'Client Hello': '<strong>TLS Client Hello</strong><br>クライアントがサーバーにTLS/SSL接続を開始するメッセージです。サポートする暗号スイートやTLSバージョンなどを通知します。',
+  'Server Hello': '<strong>TLS Server Hello</strong><br>サーバーがクライアントのHelloに応答するメッセージです。使用する暗号スイートやTLSバージョンを決定して通知します。',
+  'Certificate': '<strong>TLS Certificate</strong><br>サーバーが自身の公開鍵証明書をクライアントに送信します。これによりサーバーの身元を証明します。',
+  'Server Key Exchange': '<strong>TLS Server Key Exchange</strong><br>鍵交換のための追加情報をサーバーが送信します。DHE や ECDHE などの鍵交換方式で使用されます。',
+  'Server Hello Done': '<strong>TLS Server Hello Done</strong><br>サーバーがハンドシェイクの初期段階を完了したことを通知します。',
+  'Client Key Exchange': '<strong>TLS Client Key Exchange</strong><br>クライアントが鍵交換情報を送信します。この情報から暗号化に使用する共通鍵が生成されます。',
+  'Change Cipher Spec': '<strong>TLS Change Cipher Spec</strong><br>以降のメッセージが暗号化されることを通知します。ハンドシェイクの最終段階で送信されます。',
+  'Finished': '<strong>TLS Finished</strong><br>TLSハンドシェイクの完了を示します。このメッセージ以降、暗号化された通信が開始されます。',
+  'Application Data': '<strong>TLS Application Data</strong><br>暗号化されたアプリケーションデータ（HTTPSの本文など）が送信されています。',
+  'Alert': '<strong>TLS Alert</strong><br>TLS通信でエラーや警告が発生したことを通知します。接続の終了や問題の報告に使用されます。',
+
+  // DNS
+  'DNS Query': '<strong>DNS クエリ</strong><br>ドメイン名からIPアドレスを解決するための問い合わせです。DNSサーバーに対してドメイン名の情報を要求します。',
+  'DNS Response': '<strong>DNS レスポンス</strong><br>DNSサーバーからの応答です。クエリで要求されたドメイン名に対応するIPアドレスなどの情報が含まれます。',
+};
 
 /**
  * 初期化処理
@@ -65,7 +97,10 @@ async function init(): Promise<void> {
     // パケット受信イベントのリスナーを登録
     console.log('[Renderer] パケット受信リスナーを登録');
     win.api.capture.onPacketCaptured((packet: any) => {
-      // ログを完全にオフ（本番用）
+      // デバッグ: domainNameがあるパケットをログ出力
+      if (packet.domainName) {
+        console.log('[Renderer] ドメイン名付きパケット受信:', packet.domainName, packet);
+      }
       addPacket(packet);
     });
 
@@ -154,7 +189,6 @@ async function stopCapture(): Promise<void> {
  */
 function clearPackets(): void {
   packets = [];
-  seenIPPairs.clear(); // IPペアの記録もクリア
   stats.total = 0;
   stats.tcp = 0;
   stats.udp = 0;
@@ -185,10 +219,10 @@ function updateUIState(isCapturing: boolean): void {
 }
 
 /**
- * パケットを追加（新規IPペアのみ）
+ * パケットを追加（全パケット）
  */
 function addPacket(packet: any): void {
-  // 統計は全パケットでカウント
+  // 統計をカウント
   stats.total++;
 
   switch (packet.protocol.toUpperCase()) {
@@ -208,16 +242,7 @@ function addPacket(packet: any): void {
 
   updateStatsDisplay();
 
-  // IPペアのキーを生成（送信元IP-宛先IP、ポートは無視）
-  const ipPairKey = `${packet.sourceIP}-${packet.destIP}`;
-
-  // 既に表示済みのIPペアならスキップ
-  if (seenIPPairs.has(ipPairKey)) {
-    return;
-  }
-
-  // 新規IPペアとして記録
-  seenIPPairs.add(ipPairKey);
+  // 全パケットを配列に追加
   packets.push(packet);
 
   // パケットが多すぎる場合は古いものを削除（最大10000件）
@@ -264,14 +289,25 @@ function addPacketRow(packet: any): void {
     fractionalSecondDigits: 3
   });
 
+  // ドメイン名の表示（あれば）
+  const domainDisplay = packet.domainName
+    ? `<span style="color: #4ec9b0; font-weight: 500;">${packet.domainName}</span>`
+    : '';
+
+  // パケット状態の表示（あれば）
+  const stateDisplay = packet.packetState
+    ? `<span class="state-link" style="color: #dcdcaa; font-size: 0.85em; cursor: pointer; text-decoration: underline;" data-state="${packet.packetState}">${packet.packetState}</span>`
+    : '-';
+
   row.innerHTML = `
     <td>${packet.id}</td>
     <td>${timeStr}</td>
     <td class="${protocolClass}">${packet.protocol}</td>
+    <td>${stateDisplay}</td>
     <td>${packet.sourceIP}</td>
     <td>${packet.destIP}</td>
     <td>${packet.length}</td>
-    <td>${packet.info}</td>
+    <td>${domainDisplay ? domainDisplay + '<br>' : ''}${packet.info}</td>
     <td><button class="detail-btn" data-packet='${JSON.stringify(packet)}'>詳細</button></td>
   `;
 
@@ -280,6 +316,17 @@ function addPacketRow(packet: any): void {
   if (detailBtn) {
     detailBtn.addEventListener('click', () => {
       showPacketDetail(packet);
+    });
+  }
+
+  // 状態リンクのイベントリスナーを追加
+  const stateLink = row.querySelector('.state-link');
+  if (stateLink) {
+    stateLink.addEventListener('click', () => {
+      const state = stateLink.getAttribute('data-state');
+      if (state) {
+        showStateExplanation(state);
+      }
     });
   }
 
@@ -333,6 +380,22 @@ async function showPacketDetail(packet: any): Promise<void> {
     // プロトコル情報を解析
     const protocolInfo = analyzeProtocol(packet);
 
+    // ドメイン名の行を作成（あれば）
+    const domainRow = packet.domainName ? `
+        <div class="detail-row">
+          <div class="detail-label">ドメイン名</div>
+          <div class="detail-value" style="color: #4ec9b0; font-weight: 600;">${packet.domainName}</div>
+        </div>
+    ` : '';
+
+    // パケット状態の行を作成（あれば）
+    const stateRow = packet.packetState ? `
+        <div class="detail-row">
+          <div class="detail-label">パケット状態</div>
+          <div class="detail-value" style="color: #dcdcaa; font-weight: 600;">${packet.packetState}</div>
+        </div>
+    ` : '';
+
     // 詳細情報を表示
     modalBody.innerHTML = `
       <div class="detail-section">
@@ -349,6 +412,8 @@ async function showPacketDetail(packet: any): Promise<void> {
           <div class="detail-label">プロトコル</div>
           <div class="detail-value">${packet.protocol}</div>
         </div>
+        ${stateRow}
+        ${domainRow}
         <div class="detail-row">
           <div class="detail-label">送信元IP</div>
           <div class="detail-value">${packet.sourceIP}${packet.sourcePort ? ':' + packet.sourcePort : ''}</div>
@@ -417,6 +482,44 @@ async function showPacketDetail(packet: any): Promise<void> {
       </div>
     `;
   }
+}
+
+/**
+ * 状態説明を表示
+ */
+function showStateExplanation(state: string): void {
+  // 状態の説明を取得
+  let explanation = stateExplanations[state];
+
+  // マッピングにない場合、個別のフラグを分解して説明を組み立てる
+  if (!explanation && state.includes(',')) {
+    const flags = state.split(',').map(f => f.trim());
+    const foundExplanations = flags
+      .map(flag => {
+        const exp = stateExplanations[flag];
+        return exp ? `<div style="margin-bottom: 1rem;">${exp}</div>` : null;
+      })
+      .filter(exp => exp !== null);
+
+    if (foundExplanations.length > 0) {
+      explanation = foundExplanations.join('');
+    }
+  }
+
+  // 説明がない場合のデフォルト
+  if (!explanation) {
+    explanation = `<strong>${state}</strong><br>この状態の詳細な説明はまだ登録されていません。`;
+  }
+
+  // モーダルに表示
+  stateExplanation.innerHTML = `
+    <div style="color: #d4d4d4; line-height: 1.8;">
+      ${explanation}
+    </div>
+  `;
+
+  // モーダルを表示
+  stateModal.style.display = 'block';
 }
 
 /**
@@ -550,6 +653,18 @@ aboutModalCloseBtn.addEventListener('click', () => {
 aboutModal.addEventListener('click', (e) => {
   if (e.target === aboutModal) {
     aboutModal.classList.remove('active');
+  }
+});
+
+// 状態説明モーダル
+stateModalCloseBtn.addEventListener('click', () => {
+  stateModal.style.display = 'none';
+});
+
+// モーダル背景クリックで閉じる
+stateModal.addEventListener('click', (e) => {
+  if (e.target === stateModal) {
+    stateModal.style.display = 'none';
   }
 });
 

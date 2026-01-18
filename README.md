@@ -2,8 +2,6 @@
 
 macOSとWindowsのネットワークインターフェースを流れるIPv4パケットをリアルタイムでキャプチャし、視覚的に表示するElectronベースのクロスプラットフォームデスクトップアプリケーション。
 
-![PacketFlow Screenshot](https://via.placeholder.com/800x500.png?text=PacketFlow+Screenshot)
-
 ## 主な機能
 
 - 🔍 **リアルタイムパケットキャプチャ** - 選択したネットワークデバイスからIPv4パケットを即座にキャプチャ

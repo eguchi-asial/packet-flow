@@ -145,7 +145,11 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
 
     // デバイス選択ロジック（Windows版）
     if (deviceName) {
-      // 明示的に指定された場合
+      // 明示的に指定された場合、存在確認
+      const deviceExists = devices.some(d => d.name === deviceName);
+      if (!deviceExists) {
+        throw new Error(`指定されたデバイス "${deviceName}" が見つかりません`);
+      }
       this.device = deviceName;
     } else {
       // デフォルト: 最初のアクティブなデバイスを選択
@@ -251,7 +255,7 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
       if (packet && this.mainWindow) {
         // レンダラープロセスにパケット情報を送信
         if (shouldLog || packet.id % 100 === 1) {
-          console.log('[PacketCapture:Windows] パケット送信:', packet.id, packet.protocol);
+          console.log('[PacketCapture:Windows] パケット送信:', packet.id, packet.protocol, packet.domainName ? `ドメイン名: ${packet.domainName}` : '');
         }
         this.mainWindow.webContents.send('packet-captured', packet);
       } else {
@@ -303,6 +307,8 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
       let sourcePort: number | undefined;
       let destPort: number | undefined;
       let info = '';
+      let domainName: string | undefined;
+      let packetState: string | undefined;
 
       // プロトコル解析
       const tcpUdpOffset = offset + ipHeaderLength;
@@ -312,13 +318,48 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
         protocolName = 'TCP';
         sourcePort = buffer.readUInt16BE(tcpUdpOffset);
         destPort = buffer.readUInt16BE(tcpUdpOffset + 2);
+
+        // TCPフラグを解析（オフセット+13バイト目）
+        const tcpFlags = buffer[tcpUdpOffset + 13];
+        const flags: string[] = [];
+        if (tcpFlags & 0x02) flags.push('SYN');
+        if (tcpFlags & 0x10) flags.push('ACK');
+        if (tcpFlags & 0x01) flags.push('FIN');
+        if (tcpFlags & 0x04) flags.push('RST');
+        if (tcpFlags & 0x08) flags.push('PSH');
+
+        packetState = flags.join(',');
+
         info = `${sourceIP}:${sourcePort} → ${destIP}:${destPort}`;
+
+        // HTTPS (443) の場合、SNIとTLS状態を解析
+        if (destPort === 443 || sourcePort === 443) {
+          const tlsState = this.parseTLSState(buffer, tcpUdpOffset, length);
+          if (tlsState) {
+            packetState = tlsState;
+            if (tlsState === 'Client Hello') {
+              domainName = this.parseSNI(buffer, tcpUdpOffset, length);
+              if (domainName && shouldLog) {
+                console.log('[PacketCapture:Windows] SNI検出:', domainName);
+              }
+            }
+          }
+        }
       } else if (protocol === 17) {
         // UDP
         protocolName = 'UDP';
         sourcePort = buffer.readUInt16BE(tcpUdpOffset);
         destPort = buffer.readUInt16BE(tcpUdpOffset + 2);
         info = `${sourceIP}:${sourcePort} → ${destIP}:${destPort}`;
+
+        // DNS (53) の場合、ドメイン名を解析
+        if (sourcePort === 53 || destPort === 53) {
+          packetState = sourcePort === 53 ? 'DNS Response' : 'DNS Query';
+          domainName = this.parseDNS(buffer, tcpUdpOffset, sourcePort === 53);
+          if (domainName && shouldLog) {
+            console.log('[PacketCapture:Windows] DNS検出:', domainName);
+          }
+        }
       } else if (protocol === 1) {
         // ICMP
         protocolName = 'ICMP';
@@ -338,12 +379,255 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
         destPort,
         length,
         info,
+        domainName,
+        packetState,
       };
 
       return packetInfo;
     } catch (error) {
       console.error('[PacketCapture:Windows] パケット解析エラー:', error);
       return null;
+    }
+  }
+
+  /**
+   * DNSパケットからドメイン名を抽出
+   * @param buffer パケットバッファ
+   * @param udpOffset UDPヘッダーの開始位置
+   * @param isResponse DNSレスポンスかどうか
+   */
+  private parseDNS(buffer: Buffer, udpOffset: number, isResponse: boolean): string | undefined {
+    try {
+      // UDPヘッダー: 8バイト
+      const dnsOffset = udpOffset + 8;
+
+      // DNSヘッダー: 12バイト
+      // Questions数を取得（オフセット+4の2バイト）
+      const questionsCount = buffer.readUInt16BE(dnsOffset + 4);
+
+      if (questionsCount === 0) {
+        return undefined;
+      }
+
+      // Question セクションの開始位置
+      const questionOffset = dnsOffset + 12;
+
+      // ドメイン名をデコード
+      const domainName = this.decodeDNSName(buffer, questionOffset);
+      return domainName || undefined;
+    } catch (error) {
+      // DNSパース失敗は静かに無視
+      return undefined;
+    }
+  }
+
+  /**
+   * DNS形式のドメイン名をデコード
+   * 例: 3www3nhk2or2jp0 → www.nhk.or.jp
+   */
+  private decodeDNSName(buffer: Buffer, offset: number): string | null {
+    try {
+      const labels: string[] = [];
+      let pos = offset;
+      let jumped = false;
+      let maxJumps = 5; // 無限ループ防止
+
+      while (maxJumps > 0) {
+        if (pos >= buffer.length) break;
+
+        const length = buffer[pos];
+
+        // 終端
+        if (length === 0) {
+          break;
+        }
+
+        // 圧縮ポインタ (上位2ビットが11)
+        if ((length & 0xc0) === 0xc0) {
+          if (!jumped) {
+            // ポインタを辿る
+            const pointer = ((length & 0x3f) << 8) | buffer[pos + 1];
+            pos = pointer;
+            jumped = true;
+            maxJumps--;
+            continue;
+          } else {
+            break;
+          }
+        }
+
+        // 通常のラベル
+        if (length > 63 || pos + 1 + length > buffer.length) {
+          break;
+        }
+
+        const label = buffer.toString('utf8', pos + 1, pos + 1 + length);
+        labels.push(label);
+        pos += 1 + length;
+
+        if (labels.length > 20) {
+          break; // 異常に長いドメイン名を防ぐ
+        }
+      }
+
+      return labels.length > 0 ? labels.join('.') : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * TLSパケットの状態を判定
+   * @param buffer パケットバッファ
+   * @param tcpOffset TCPヘッダーの開始位置
+   * @param length パケット全体の長さ
+   */
+  private parseTLSState(buffer: Buffer, tcpOffset: number, length: number): string | undefined {
+    try {
+      // TCPヘッダー長を取得
+      const tcpHeaderLength = ((buffer[tcpOffset + 12] >> 4) & 0x0f) * 4;
+      const tlsOffset = tcpOffset + tcpHeaderLength;
+
+      // TLSレコード最小サイズチェック
+      if (tlsOffset + 6 > length) {
+        return undefined;
+      }
+
+      // TLSレコードタイプを確認
+      const recordType = buffer[tlsOffset];
+
+      // 0x16 = Handshake
+      if (recordType === 0x16) {
+        const handshakeType = buffer[tlsOffset + 5];
+
+        // Handshakeタイプを判定
+        if (handshakeType === 0x01) {
+          return 'Client Hello';
+        } else if (handshakeType === 0x02) {
+          return 'Server Hello';
+        } else if (handshakeType === 0x0b) {
+          return 'Certificate';
+        } else if (handshakeType === 0x10) {
+          return 'Client Key Exchange';
+        } else if (handshakeType === 0x14) {
+          return 'Finished';
+        }
+      }
+      // 0x14 = Change Cipher Spec
+      else if (recordType === 0x14) {
+        return 'Change Cipher Spec';
+      }
+      // 0x17 = Application Data
+      else if (recordType === 0x17) {
+        return 'Application Data';
+      }
+      // 0x15 = Alert
+      else if (recordType === 0x15) {
+        return 'Alert';
+      }
+
+      return undefined;
+    } catch (error) {
+      return undefined;
+    }
+  }
+
+  /**
+   * TLS Client HelloからSNI（Server Name Indication）を抽出
+   * @param buffer パケットバッファ
+   * @param tcpOffset TCPヘッダーの開始位置
+   * @param length パケット全体の長さ
+   */
+  private parseSNI(buffer: Buffer, tcpOffset: number, length: number): string | undefined {
+    try {
+      // TCPヘッダー長を取得（オフセット+12の上位4ビット * 4）
+      const tcpHeaderLength = ((buffer[tcpOffset + 12] >> 4) & 0x0f) * 4;
+      const tlsOffset = tcpOffset + tcpHeaderLength;
+
+      // TLSレコード最小サイズチェック
+      if (tlsOffset + 5 > length) {
+        return undefined;
+      }
+
+      // TLSレコードタイプ: 0x16 = Handshake
+      if (buffer[tlsOffset] !== 0x16) {
+        return undefined;
+      }
+
+      // TLSバージョン (TLS 1.0-1.3: 0x0301-0x0303程度)
+      const tlsVersion = buffer.readUInt16BE(tlsOffset + 1);
+      if (tlsVersion < 0x0301 || tlsVersion > 0x0304) {
+        return undefined;
+      }
+
+      // Handshakeタイプ: 0x01 = Client Hello
+      if (buffer[tlsOffset + 5] !== 0x01) {
+        return undefined;
+      }
+
+      // Client Helloの解析（簡略版）
+      // セッションID長を取得してスキップ
+      let pos = tlsOffset + 38; // レコードヘッダー(5) + ハンドシェイクヘッダー(4) + バージョン(2) + ランダム(32)
+
+      if (pos >= length) return undefined;
+
+      const sessionIdLength = buffer[pos];
+      pos += 1 + sessionIdLength;
+
+      if (pos + 2 > length) return undefined;
+
+      // Cipher Suites長を取得してスキップ
+      const cipherSuitesLength = buffer.readUInt16BE(pos);
+      pos += 2 + cipherSuitesLength;
+
+      if (pos + 1 > length) return undefined;
+
+      // Compression Methods長を取得してスキップ
+      const compressionMethodsLength = buffer[pos];
+      pos += 1 + compressionMethodsLength;
+
+      if (pos + 2 > length) return undefined;
+
+      // Extensions長
+      const extensionsLength = buffer.readUInt16BE(pos);
+      pos += 2;
+
+      const extensionsEnd = pos + extensionsLength;
+
+      // Extensions を走査
+      while (pos + 4 <= extensionsEnd && pos + 4 <= length) {
+        const extType = buffer.readUInt16BE(pos);
+        const extLength = buffer.readUInt16BE(pos + 2);
+        pos += 4;
+
+        // SNI Extension: 0x0000
+        if (extType === 0x0000) {
+          if (pos + 2 > length) break;
+
+          const serverNameListLength = buffer.readUInt16BE(pos);
+          pos += 2;
+
+          if (pos + 3 > length) break;
+
+          const serverNameType = buffer[pos]; // 0x00 = host_name
+          const serverNameLength = buffer.readUInt16BE(pos + 1);
+          pos += 3;
+
+          if (serverNameType === 0x00 && pos + serverNameLength <= length) {
+            const serverName = buffer.toString('utf8', pos, pos + serverNameLength);
+            return serverName;
+          }
+
+          break;
+        }
+
+        pos += extLength;
+      }
+
+      return undefined;
+    } catch (error) {
+      // SNIパース失敗は静かに無視
+      return undefined;
     }
   }
 }
