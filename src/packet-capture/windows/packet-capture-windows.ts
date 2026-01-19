@@ -21,6 +21,8 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
   private packetCounter = 0;
   private mainWindow: BrowserWindow | null = null;
   private debugLogCounter = 0; // デバッグログ用カウンター
+  private dnsCache: Map<string, string> = new Map(); // IP → ドメイン名のマッピング
+  private applicationDataSeen: Set<string> = new Set(); // Application Data表示済み接続を追跡
 
   constructor() {
     try {
@@ -174,8 +176,8 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
     console.log('[PacketCapture:Windows] 使用するデバイス:', this.device);
 
     try {
-      // キャプチャフィルター: 全てのIPv4パケット
-      const filter = 'ip';
+      // キャプチャフィルター: アプリケーション層プロトコルのみ (HTTP, HTTPS, DNS等)
+      const filter = 'tcp portrange 80-8080 or udp port 53';
       const bufSize = 10 * 1024 * 1024; // 10MB
       const buffer = Buffer.alloc(65535);
 
@@ -337,11 +339,36 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
           const tlsState = this.parseTLSState(buffer, tcpUdpOffset, length);
           if (tlsState) {
             packetState = tlsState;
+            console.log('[PacketCapture:Windows] TLS状態検出:', tlsState);
             if (tlsState === 'Client Hello') {
               domainName = this.parseSNI(buffer, tcpUdpOffset, length);
-              if (domainName && shouldLog) {
-                console.log('[PacketCapture:Windows] SNI検出:', domainName);
+              if (domainName) {
+                console.log('[PacketCapture:Windows] ✅ SNI ドメイン名抽出成功:', domainName);
+              } else {
+                console.log('[PacketCapture:Windows] ❌ SNI ドメイン名抽出失敗');
               }
+            }
+
+            // Application Dataの場合、接続ごとに最初の1回だけ表示
+            if (tlsState === 'Application Data') {
+              const connKey = `${sourceIP}:${sourcePort}-${destIP}:${destPort}`;
+              if (!this.applicationDataSeen.has(connKey)) {
+                this.applicationDataSeen.add(connKey);
+                packetState = 'HTTP(S) Data Transfer';
+                console.log('[PacketCapture:Windows] ✅ HTTP(S)データ転送開始:', connKey);
+              } else {
+                // 2回目以降は表示しない
+                packetState = undefined;
+              }
+            }
+          }
+
+          // SNIで取得できなかった場合、DNSキャッシュから取得を試みる
+          if (!domainName && packetState !== undefined) {
+            const cachedDomain = this.dnsCache.get(destPort === 443 ? destIP : sourceIP);
+            if (cachedDomain) {
+              domainName = cachedDomain;
+              console.log('[PacketCapture:Windows] ✅ DNSキャッシュからドメイン名取得:', domainName);
             }
           }
         }
@@ -355,9 +382,21 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
         // DNS (53) の場合、ドメイン名を解析
         if (sourcePort === 53 || destPort === 53) {
           packetState = sourcePort === 53 ? 'DNS Response' : 'DNS Query';
+          console.log('[PacketCapture:Windows] DNSパケット検出 - sourcePort:', sourcePort, 'destPort:', destPort);
           domainName = this.parseDNS(buffer, tcpUdpOffset, sourcePort === 53);
-          if (domainName && shouldLog) {
-            console.log('[PacketCapture:Windows] DNS検出:', domainName);
+          if (domainName) {
+            console.log('[PacketCapture:Windows] ✅ DNS ドメイン名抽出成功:', domainName);
+
+            // DNS応答の場合、IPアドレスを取得してキャッシュに保存
+            if (sourcePort === 53) {
+              const resolvedIP = this.extractDNSAnswer(buffer, tcpUdpOffset);
+              if (resolvedIP) {
+                this.dnsCache.set(resolvedIP, domainName);
+                console.log(`[PacketCapture:Windows] DNSキャッシュ保存: ${domainName} = ${resolvedIP}`);
+              }
+            }
+          } else {
+            console.log('[PacketCapture:Windows] ❌ DNS ドメイン名抽出失敗');
           }
         }
       } else if (protocol === 1) {
@@ -382,6 +421,44 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
         domainName,
         packetState,
       };
+
+      // 意味のあるパケットのみをUIに表示
+      // - TLS/DNSの重要な状態を持つパケット
+      // - ドメイン名が取得できたパケット
+      // - UDPパケット（DNS等）
+      // - 単純なACKやPSH,ACKなどのトランスポート層のみのパケットは除外
+      const isSignificantPacket = (
+        // TLS関連の重要な状態
+        packetState === 'Client Hello' ||
+        packetState === 'Server Hello' ||
+        packetState === 'Certificate' ||
+        packetState === 'Server Key Exchange' ||
+        packetState === 'Client Key Exchange' ||
+        packetState === 'Change Cipher Spec' ||
+        packetState === 'Finished' ||
+        packetState === 'Alert' ||
+        // HTTP(S)データ転送
+        packetState === 'HTTP(S) Data Transfer' ||
+        // DNS関連
+        packetState === 'DNS Query' ||
+        packetState === 'DNS Response' ||
+        // ドメイン名が取得できた
+        domainName !== undefined ||
+        // UDPプロトコル（DNS等）
+        protocolName === 'UDP' ||
+        // TCPハンドシェイク
+        packetState === 'SYN' ||
+        packetState === 'SYN,ACK' ||
+        packetState === 'FIN' ||
+        packetState === 'FIN,ACK' ||
+        packetState === 'RST'
+      );
+
+      if (!isSignificantPacket) {
+        // 重要でないパケット（ACK、PSH,ACK等）はログのみ
+        console.log(`[PacketCapture:Windows] スキップ（表示価値なし）: ${protocolName} ${packetState || 'no-state'}`);
+        return null;
+      }
 
       return packetInfo;
     } catch (error) {
@@ -417,6 +494,80 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
       return domainName || undefined;
     } catch (error) {
       // DNSパース失敗は静かに無視
+      return undefined;
+    }
+  }
+
+  /**
+   * DNS応答からIPアドレス（A レコード）を抽出
+   * @param buffer パケットバッファ
+   * @param udpOffset UDPヘッダーの開始位置
+   * @returns 解決されたIPアドレス
+   */
+  private extractDNSAnswer(buffer: Buffer, udpOffset: number): string | undefined {
+    try {
+      const dnsOffset = udpOffset + 8; // UDPヘッダー: 8バイト
+
+      // DNSヘッダーを解析
+      const questionsCount = buffer.readUInt16BE(dnsOffset + 4);
+      const answersCount = buffer.readUInt16BE(dnsOffset + 6);
+
+      if (answersCount === 0) {
+        return undefined; // 回答がない
+      }
+
+      // Questionセクションをスキップ
+      let pos = dnsOffset + 12;
+      for (let i = 0; i < questionsCount; i++) {
+        // ドメイン名をスキップ
+        while (pos < buffer.length) {
+          const len = buffer[pos];
+          if (len === 0) {
+            pos++; // 終端
+            break;
+          }
+          if ((len & 0xc0) === 0xc0) {
+            pos += 2; // 圧縮ポインタ
+            break;
+          }
+          pos += 1 + len;
+        }
+        pos += 4; // Type (2) + Class (2)
+      }
+
+      // Answerセクションを解析
+      for (let i = 0; i < answersCount; i++) {
+        // ドメイン名をスキップ
+        while (pos < buffer.length) {
+          const len = buffer[pos];
+          if (len === 0) {
+            pos++;
+            break;
+          }
+          if ((len & 0xc0) === 0xc0) {
+            pos += 2; // 圧縮ポインタ
+            break;
+          }
+          pos += 1 + len;
+        }
+
+        if (pos + 10 > buffer.length) break;
+
+        const type = buffer.readUInt16BE(pos);     // Type
+        const dataLength = buffer.readUInt16BE(pos + 8); // Data Length
+        pos += 10; // Type (2) + Class (2) + TTL (4) + Length (2)
+
+        // Type 1 = A レコード (IPv4)
+        if (type === 1 && dataLength === 4) {
+          const ip = `${buffer[pos]}.${buffer[pos + 1]}.${buffer[pos + 2]}.${buffer[pos + 3]}`;
+          return ip;
+        }
+
+        pos += dataLength; // 次のAnswerへ
+      }
+
+      return undefined;
+    } catch (error) {
       return undefined;
     }
   }
@@ -544,24 +695,46 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
       const tcpHeaderLength = ((buffer[tcpOffset + 12] >> 4) & 0x0f) * 4;
       const tlsOffset = tcpOffset + tcpHeaderLength;
 
+      console.log('[PacketCapture:Windows] SNI解析開始 - tcpOffset:', tcpOffset, 'tcpHeaderLength:', tcpHeaderLength, 'tlsOffset:', tlsOffset, 'length:', length);
+
       // TLSレコード最小サイズチェック
-      if (tlsOffset + 5 > length) {
+      if (tlsOffset + 9 > length) {
+        console.log('[PacketCapture:Windows] SNI失敗: TLSレコード最小サイズ不足');
         return undefined;
       }
 
       // TLSレコードタイプ: 0x16 = Handshake
-      if (buffer[tlsOffset] !== 0x16) {
+      const recordType = buffer[tlsOffset];
+      console.log('[PacketCapture:Windows] TLSレコードタイプ:', '0x' + recordType.toString(16));
+      if (recordType !== 0x16) {
+        console.log('[PacketCapture:Windows] SNI失敗: Handshakeではない');
         return undefined;
       }
 
-      // TLSバージョン (TLS 1.0-1.3: 0x0301-0x0303程度)
+      // TLSレコード長を取得（3-4バイト目）
+      const tlsRecordLength = buffer.readUInt16BE(tlsOffset + 3);
+      const totalTlsLength = tlsOffset + 5 + tlsRecordLength;
+      console.log('[PacketCapture:Windows] TLSレコード長:', tlsRecordLength, 'パケット全体の必要長:', totalTlsLength, '実際のlength:', length);
+
+      // パケットが分割されている場合はスキップ
+      if (totalTlsLength > length) {
+        console.log('[PacketCapture:Windows] SNI失敗: パケットが分割されている (TLS Client Helloが複数パケットにまたがっている)');
+        return undefined;
+      }
+
+      // TLSバージョン (TLS 1.0-1.3: 0x0301-0x0304)
       const tlsVersion = buffer.readUInt16BE(tlsOffset + 1);
+      console.log('[PacketCapture:Windows] TLSバージョン:', '0x' + tlsVersion.toString(16));
       if (tlsVersion < 0x0301 || tlsVersion > 0x0304) {
+        console.log('[PacketCapture:Windows] SNI失敗: TLSバージョンが範囲外');
         return undefined;
       }
 
       // Handshakeタイプ: 0x01 = Client Hello
-      if (buffer[tlsOffset + 5] !== 0x01) {
+      const handshakeType = buffer[tlsOffset + 5];
+      console.log('[PacketCapture:Windows] Handshakeタイプ:', '0x' + handshakeType.toString(16));
+      if (handshakeType !== 0x01) {
+        console.log('[PacketCapture:Windows] SNI失敗: Client Helloではない');
         return undefined;
       }
 
@@ -569,27 +742,45 @@ export class PacketCaptureWindows implements IPacketCaptureManager {
       // セッションID長を取得してスキップ
       let pos = tlsOffset + 38; // レコードヘッダー(5) + ハンドシェイクヘッダー(4) + バージョン(2) + ランダム(32)
 
-      if (pos >= length) return undefined;
+      console.log('[PacketCapture:Windows] Client Hello解析開始 - 初期pos:', pos);
+
+      if (pos >= length) {
+        console.log('[PacketCapture:Windows] SNI失敗: バッファ長不足(初期pos)');
+        return undefined;
+      }
 
       const sessionIdLength = buffer[pos];
+      console.log('[PacketCapture:Windows] SessionID長:', sessionIdLength);
       pos += 1 + sessionIdLength;
 
-      if (pos + 2 > length) return undefined;
+      if (pos + 2 > length) {
+        console.log('[PacketCapture:Windows] SNI失敗: バッファ長不足(CipherSuites前)');
+        return undefined;
+      }
 
       // Cipher Suites長を取得してスキップ
       const cipherSuitesLength = buffer.readUInt16BE(pos);
+      console.log('[PacketCapture:Windows] CipherSuites長:', cipherSuitesLength);
       pos += 2 + cipherSuitesLength;
 
-      if (pos + 1 > length) return undefined;
+      if (pos + 1 > length) {
+        console.log('[PacketCapture:Windows] SNI失敗: バッファ長不足(CompressionMethods前)');
+        return undefined;
+      }
 
       // Compression Methods長を取得してスキップ
       const compressionMethodsLength = buffer[pos];
+      console.log('[PacketCapture:Windows] CompressionMethods長:', compressionMethodsLength);
       pos += 1 + compressionMethodsLength;
 
-      if (pos + 2 > length) return undefined;
+      if (pos + 2 > length) {
+        console.log('[PacketCapture:Windows] SNI失敗: バッファ長不足(Extensions前)');
+        return undefined;
+      }
 
       // Extensions長
       const extensionsLength = buffer.readUInt16BE(pos);
+      console.log('[PacketCapture:Windows] Extensions長:', extensionsLength);
       pos += 2;
 
       const extensionsEnd = pos + extensionsLength;

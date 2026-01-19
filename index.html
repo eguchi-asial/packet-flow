@@ -422,24 +422,48 @@
         <div class="detail-section">
           <h3>アプリの概要</h3>
           <p style="color: #d4d4d4; line-height: 1.6; margin-bottom: 1rem;">
-            PacketFlowは、macOSのネットワークインターフェース（en0）を流れるIPv4パケットをリアルタイムでキャプチャし、
-            視覚的に表示するElectronベースのデスクトップアプリケーションです。
+            PacketFlowは、macOSとWindowsのネットワークインターフェースを流れるパケットをリアルタイムでキャプチャし、
+            TLS/SSL状態やDNS通信を詳細に解析して視覚的に表示するElectronベースのクロスプラットフォームデスクトップアプリケーションです。
           </p>
+        </div>
+
+        <div class="detail-section">
+          <h3>主な機能</h3>
+          <div class="detail-row">
+            <div class="detail-label">TLS/SSL解析</div>
+            <div class="detail-value">Client Hello、Server Hello、Certificate等のハンドシェイク状態を可視化</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">DNS解析とキャッシュ</div>
+            <div class="detail-value">DNSクエリ/レスポンスを解析し、IP→ドメイン名のマッピングをキャッシュ</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">インテリジェントフィルタ</div>
+            <div class="detail-value">重要なパケット（TLS、DNS、ハンドシェイク、HTTP(S)データ転送）のみを表示</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">状態説明ポップアップ</div>
+            <div class="detail-value">各パケット状態の詳しい説明を表示</div>
+          </div>
         </div>
 
         <div class="detail-section">
           <h3>技術仕様</h3>
           <div class="detail-row">
             <div class="detail-label">パケットキャプチャ</div>
-            <div class="detail-value">libpcap（capモジュール）を使用してen0デバイスから生のパケットを取得</div>
+            <div class="detail-value">macOS: libpcap / Windows: Npcap</div>
           </div>
           <div class="detail-row">
             <div class="detail-label">対応プロトコル</div>
-            <div class="detail-value">IPv4のみ（TCP, UDP, ICMP, その他）</div>
+            <div class="detail-value">IPv4（TCP, UDP, ICMP, その他）</div>
           </div>
           <div class="detail-row">
-            <div class="detail-label">フィルタリング</div>
-            <div class="detail-value">BPF（Berkeley Packet Filter）で'ip'フィルタを適用</div>
+            <div class="detail-label">BPFフィルタ</div>
+            <div class="detail-value">tcp portrange 80-8080 or udp port 53（アプリケーション層のみ）</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">アプリ層フィルタ</div>
+            <div class="detail-value">TLS状態、HTTP(S)データ転送、DNS、ハンドシェイク、DNSキャッシュ登録済IPとの通信のみ表示（単純なACK/PSH+ACKは除外）</div>
           </div>
           <div class="detail-row">
             <div class="detail-label">バッファサイズ</div>
@@ -448,26 +472,48 @@
         </div>
 
         <div class="detail-section">
-          <h3>一意なIPペアの表示方法</h3>
+          <h3>TLS/SSL状態の検出</h3>
           <p style="color: #d4d4d4; line-height: 1.6; margin-bottom: 0.5rem;">
-            PacketFlowは、<strong style="color: #4ec9b0;">送信元IP-宛先IPの組み合わせ</strong>を一意のキーとして管理し、
-            同じIPペアの通信は初回のみ表示します。
+            HTTPS通信のTLSハンドシェイクを詳細に解析します。
           </p>
           <div class="detail-row">
-            <div class="detail-label">判定基準</div>
-            <div class="detail-value">送信元IP + 宛先IP（ポート番号は無視）</div>
+            <div class="detail-label">検出可能な状態</div>
+            <div class="detail-value">Client Hello, Server Hello, Certificate, Change Cipher Spec, Finished, HTTP(S) Data Transfer, Alert等</div>
           </div>
           <div class="detail-row">
-            <div class="detail-label">実装方法</div>
-            <div class="detail-value">JavaScriptのSetオブジェクトで既出IPペアを記録（seenIPPairs）</div>
+            <div class="detail-label">SNI抽出</div>
+            <div class="detail-value">Client HelloからServer Name Indication（ドメイン名）を抽出</div>
           </div>
           <div class="detail-row">
-            <div class="detail-label">統計情報</div>
-            <div class="detail-value">全パケット数をカウント、一覧には新規IPペアのみ追加</div>
+            <div class="detail-label">制限事項</div>
+            <div class="detail-value">大きなClient Hello（1500バイト超）はTCP分割されるため、SNI抽出に失敗</div>
           </div>
           <div class="detail-row">
-            <div class="detail-label">上限</div>
-            <div class="detail-value">最大10,000件まで保存（古いものから自動削除）</div>
+            <div class="detail-label">HTTP(S) Data Transfer</div>
+            <div class="detail-value">暗号化された通信開始を検出。接続ごとに最初の1回のみ表示し、以降のApplication Dataパケット（数百個）はスキップ</div>
+          </div>
+        </div>
+
+        <div class="detail-section">
+          <h3>DNS解析とキャッシュ</h3>
+          <p style="color: #d4d4d4; line-height: 1.6; margin-bottom: 0.5rem;">
+            DNS通信を解析し、IP→ドメイン名のマッピングをキャッシュします。
+          </p>
+          <div class="detail-row">
+            <div class="detail-label">DNS Query</div>
+            <div class="detail-value">ドメイン名の問い合わせを検出</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">DNS Response</div>
+            <div class="detail-value">応答からドメイン名とIPアドレスを抽出してキャッシュ</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">キャッシュ活用</div>
+            <div class="detail-value">SNI抽出失敗時も、キャッシュからドメイン名を表示。ACKパケットでも、キャッシュに登録済のIPアドレス（ポート443）との通信ならドメイン名が表示される</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">制限事項</div>
+            <div class="detail-value">DNS over HTTPS（DoH）は解析不可。従来のDNS（port 53）のみ対応</div>
           </div>
         </div>
 
@@ -528,20 +574,40 @@
         <div class="detail-section">
           <h3>パケット解析の仕組み</h3>
           <div class="detail-row">
-            <div class="detail-label">Ethernetヘッダー</div>
+            <div class="detail-label">1. Ethernetヘッダー</div>
             <div class="detail-value">14バイトをスキップ</div>
           </div>
           <div class="detail-row">
-            <div class="detail-label">IPヘッダー</div>
+            <div class="detail-label">2. IPヘッダー</div>
             <div class="detail-value">バージョン、ヘッダー長、プロトコル番号、送信元・宛先IPを抽出</div>
           </div>
           <div class="detail-row">
-            <div class="detail-label">TCP/UDPヘッダー</div>
+            <div class="detail-label">3. TCP/UDPヘッダー</div>
             <div class="detail-value">送信元・宛先ポート番号をビッグエンディアンで読み取り</div>
           </div>
           <div class="detail-row">
-            <div class="detail-label">プロトコル判定</div>
+            <div class="detail-label">4. プロトコル判定</div>
             <div class="detail-value">IPヘッダーのプロトコルフィールド（6=TCP, 17=UDP, 1=ICMP）</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">5. アプリ層解析</div>
+            <div class="detail-value">ポート443: TLS状態/SNI抽出、ポート53: DNS解析、ポート80-8080: HTTP</div>
+          </div>
+        </div>
+
+        <div class="detail-section">
+          <h3>パフォーマンス最適化</h3>
+          <div class="detail-row">
+            <div class="detail-label">BPFフィルタ</div>
+            <div class="detail-value">カーネルレベルでポート80-8080、53のみキャプチャ</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">アプリ層フィルタ</div>
+            <div class="detail-value">重要なパケットのみUI表示。単純なACK/PSH+ACKは除外。Application Dataは接続ごとに最初の1回のみ「HTTP(S) Data Transfer」として表示</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">メモリ効率</div>
+            <div class="detail-value">DNSキャッシュ: 約50KB/1000エントリ、TCP再構成なし</div>
           </div>
         </div>
 

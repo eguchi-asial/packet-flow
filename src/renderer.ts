@@ -83,9 +83,16 @@ const stateExplanations: { [key: string]: string } = {
   'Application Data': '<strong>TLS Application Data</strong><br>暗号化されたアプリケーションデータ（HTTPSの本文など）が送信されています。',
   'Alert': '<strong>TLS Alert</strong><br>TLS通信でエラーや警告が発生したことを通知します。接続の終了や問題の報告に使用されます。',
 
+  // HTTP(S) データ転送
+  'HTTP(S) Data Transfer': '<strong>HTTP(S) データ転送</strong><br>この接続でHTTP/HTTPSデータ転送が開始されたことを示します。<br>実際には数百個の暗号化されたパケット（Application Data）が送信されますが、ノイズを避けるため最初の1回のみ表示しています。<br><em>※ Change Cipher Spec後にこの状態が現れれば、HTTP通信が行われています。</em>',
+
   // DNS
-  'DNS Query': '<strong>DNS クエリ</strong><br>ドメイン名からIPアドレスを解決するための問い合わせです。DNSサーバーに対してドメイン名の情報を要求します。',
-  'DNS Response': '<strong>DNS レスポンス</strong><br>DNSサーバーからの応答です。クエリで要求されたドメイン名に対応するIPアドレスなどの情報が含まれます。',
+  'DNS Query': '<strong>DNS クエリ（問い合わせ）</strong><br>ドメイン名（例: google.com）からIPアドレスを解決するための問い合わせパケットです。<br>UDP port 53を使用してDNSサーバー（通常 8.8.8.8 や 1.1.1.1）に送信されます。<br><em>※ 最近のブラウザはDNS over HTTPS (DoH)を使用するため、従来のDNSクエリが見えない場合があります。</em>',
+  'DNS Response': '<strong>DNS レスポンス（応答）</strong><br>DNSサーバーからの応答パケットです。<br>クエリで要求されたドメイン名に対応するIPアドレス（例: google.com = 142.250.207.46）が含まれます。<br>この情報を使って、以降のHTTPS通信でドメイン名を表示できます。',
+
+  // HTTP
+  'HTTP Request': '<strong>HTTP リクエスト</strong><br>暗号化されていないHTTP通信のリクエストです。GET、POST等のメソッドとURLが含まれます。<br><em>※ セキュリティ上、HTTPSの使用が推奨されます。</em>',
+  'HTTP Response': '<strong>HTTP レスポンス</strong><br>HTTPサーバーからの応答です。ステータスコード（200 OK、404 Not Found等）とコンテンツが含まれます。',
 };
 
 /**
