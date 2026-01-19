@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
 import { createPacketCaptureManager, IPacketCaptureManager } from './packet-capture/index';
+import { networkInterfaces } from 'os';
 
 // パケットキャプチャマネージャーのインスタンス（プラットフォーム別）
 let captureManager: IPacketCaptureManager;
@@ -73,6 +74,32 @@ function setupIpcHandlers(): void {
   // キャプチャ状態を取得
   ipcMain.handle('is-capturing', () => {
     return captureManager.isCaptureActive();
+  });
+
+  // 自分のローカルIPアドレスを取得
+  ipcMain.handle('get-local-ip', () => {
+    try {
+      const nets = networkInterfaces();
+      const localIPs: string[] = [];
+
+      for (const name of Object.keys(nets)) {
+        const netInfo = nets[name];
+        if (!netInfo) continue;
+
+        for (const net of netInfo) {
+          // IPv4で、内部アドレスでない（実際のローカルネットワークアドレス）
+          if (net.family === 'IPv4' && !net.internal) {
+            localIPs.push(net.address);
+          }
+        }
+      }
+
+      console.log('[Main] ローカルIPアドレス:', localIPs);
+      return localIPs;
+    } catch (error) {
+      console.error('[Main] ローカルIP取得エラー:', error);
+      return [];
+    }
   });
 }
 

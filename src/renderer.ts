@@ -13,6 +13,7 @@ interface WindowWithAPI extends Window {
       stopCapture: () => Promise<boolean>;
       isCapturing: () => Promise<boolean>;
       onPacketCaptured: (callback: (packet: any) => void) => void;
+      getLocalIP: () => Promise<string[]>;
     };
   };
 }
@@ -22,6 +23,9 @@ const win = window as unknown as WindowWithAPI;
 
 // パケットデータを保存する配列（全パケット）
 let packets: any[] = [];
+
+// 自分のローカルIPアドレス一覧
+let localIPs: string[] = [];
 
 // 統計情報
 const stats = {
@@ -113,6 +117,10 @@ async function init(): Promise<void> {
 
     // デバイス一覧を取得してドロップダウンに追加
     await loadDevices();
+
+    // 自分のローカルIPアドレスを取得
+    localIPs = await win.api.capture.getLocalIP();
+    console.log('[Renderer] ローカルIPアドレス取得:', localIPs);
 
     console.log('[Renderer] 初期化完了');
   } catch (error) {
@@ -306,13 +314,21 @@ function addPacketRow(packet: any): void {
     ? `<span class="state-link" style="color: #dcdcaa; font-size: 0.85em; cursor: pointer; text-decoration: underline;" data-state="${packet.packetState}">${packet.packetState}</span>`
     : '-';
 
+  // 自分のIPアドレスかどうかを判定
+  const isMySourceIP = localIPs.includes(packet.sourceIP);
+  const isMyDestIP = localIPs.includes(packet.destIP);
+
+  // 自分のIPの場合、クラスを追加
+  const sourceIPClass = isMySourceIP ? 'my-ip' : '';
+  const destIPClass = isMyDestIP ? 'my-ip' : '';
+
   row.innerHTML = `
     <td>${packet.id}</td>
     <td>${timeStr}</td>
     <td class="${protocolClass}">${packet.protocol}</td>
     <td>${stateDisplay}</td>
-    <td>${packet.sourceIP}</td>
-    <td>${packet.destIP}</td>
+    <td class="${sourceIPClass}">${packet.sourceIP}</td>
+    <td class="${destIPClass}">${packet.destIP}</td>
     <td>${packet.length}</td>
     <td>${domainDisplay ? domainDisplay + '<br>' : ''}${packet.info}</td>
     <td><button class="detail-btn" data-packet='${JSON.stringify(packet)}'>詳細</button></td>

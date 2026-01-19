@@ -28,5 +28,8 @@ contextBridge.exposeInMainWorld('api', {
     onPacketCaptured: (callback: (packet: any) => void) => {
       ipcRenderer.on('packet-captured', (_event, packet) => callback(packet));
     },
+
+    // 自分のローカルIPアドレスを取得
+    getLocalIP: () => ipcRenderer.invoke('get-local-ip'),
   },
 });
